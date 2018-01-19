@@ -243,17 +243,17 @@
     }
 
     NGSI.endpoints = {
-        REGISTER_CONTEXT: 'v1/registry/registerContext',
-        DISCOVER_CONTEXT_AVAILABILITY: 'v1/registry/discoverContextAvailability',
-        SUBSCRIBE_CONTEXT_AVAILABILITY: 'v1/registry/subscribeContextAvailability',
-        UPDATE_CONTEXT_AVAILABILITY_SUBSCRIPTION: 'v1/registry/updateContextAvailabilitySubscription',
-        UNSUBSCRIBE_CONTEXT_AVAILABILITY: 'v1/registry/unsubscribeContextAvailability',
-        QUERY_CONTEXT: 'v1/queryContext',
-        UPDATE_CONTEXT: 'v1/updateContext',
-        SUBSCRIBE_CONTEXT: 'v1/subscribeContext',
-        UPDATE_CONTEXT_SUBSCRIPTION: 'v1/updateContextSubscription',
-        UNSUBSCRIBE_CONTEXT: 'v1/unsubscribeContext',
-        CONTEXT_TYPES: 'v1/contextTypes',
+        REGISTER_CONTEXT: 'ngsi10/registry/registerContext',
+        DISCOVER_CONTEXT_AVAILABILITY: 'ngsi10/registry/discoverContextAvailability',
+        SUBSCRIBE_CONTEXT_AVAILABILITY: 'ngsi10/registry/subscribeContextAvailability',
+        UPDATE_CONTEXT_AVAILABILITY_SUBSCRIPTION: 'ngsi10/registry/updateContextAvailabilitySubscription',
+        UNSUBSCRIBE_CONTEXT_AVAILABILITY: 'ngsi10/registry/unsubscribeContextAvailability',
+        QUERY_CONTEXT: 'ngsi10/queryContext',
+        UPDATE_CONTEXT: 'ngsi10/updateContext',
+        SUBSCRIBE_CONTEXT: 'ngsi10/subscribeContext',
+        UPDATE_CONTEXT_SUBSCRIPTION: 'ngsi10/updateContextSubscription',
+        UNSUBSCRIBE_CONTEXT: 'ngsi10/unsubscribeContext',
+        CONTEXT_TYPES: 'ngsi10/contextTypes',
 
         v2: {
             BATCH_QUERY_OP: 'v2/op/query',
@@ -407,13 +407,16 @@
         var entityId, isPattern;
 
         isPattern = (typeof entity.isPattern === 'string' && entity.isPattern.trim().toLowerCase() === 'true') || (entity.isPattern === true);
+
         entityId = {
-            id: "" + entity.id,
-            isPattern: "" + isPattern
+            entityId: {
+                id: entity.id,
+                isPattern: "" + isPattern
+            }
         };
 
         if (entity.type != null) {
-            entityId.type = "" + entity.type;
+            entityId.entityId.type = "" + entity.type;
         }
 
         return entityId;
@@ -466,8 +469,8 @@
         if (Array.isArray(restriction.scopes)) {
             for (i = 0; i < restriction.scopes.length; i++) {
                 result.scopes.push({
-                    type: restriction.scopes[i].type,
-                    value: ngsi_build_scope_restriction_element_json(restriction.scopes[i])
+                    scopeType: restriction.scopes[i].scopeType,
+                    scopeValue: restriction.scopes[i].scopeValue
                 });
             }
         }
@@ -539,7 +542,7 @@
         };
 
         for (i = 0; i < e.length; i += 1) {
-            body.entities.push(ngsi_build_entity_id_element_json(e[i]));
+            body.entities.push(ngsi_build_entity_id_element_json(e[i]).entityId);
         }
 
         if (Array.isArray(attrNames) && attrNames.length > 0) {
@@ -595,11 +598,11 @@
                             value = null;
                         }
 
-                        attributeElement.value = value;
+                        attributeElement.contextValue = value;
                     }
 
                     if (Array.isArray(attribute.metadata) && attribute.metadata.length > 0) {
-                        attributeElement.metadatas = ngsi_build_attribute_metadata_element(attribute.metadata);
+                        attributeElement.metadata = ngsi_build_attribute_metadata_element(attribute.metadata);
                     }
 
                     attributeListElement.push(attributeElement);
@@ -832,6 +835,10 @@
             value = "";
         }
 
+        if (elements == null) {
+            return [data, error_data];
+        }
+
         for (i = 0; i < elements.length; i += 1) {
             contextResponse = elements[i].contextElement;
             status_info = process_status_info_json(elements[i]);
@@ -847,12 +854,12 @@
 
             // Entity
             if (status_info.code === 200 && flat) {
-                entry.id = contextResponse.id;
-                entry.type = contextResponse.type;
+                entry.id = contextResponse.entityId.id;
+                entry.type = contextResponse.entityId.type;
             } else {
                 entry.entity = {
-                    id: contextResponse.id,
-                    type: contextResponse.type
+                    id: contextResponse.entityId.id,
+                    type: contextResponse.entityId.type
                 };
             }
 
@@ -861,7 +868,7 @@
                 for (j = 0; j < contextResponse.attributes.length; j += 1) {
                     attribute_info = contextResponse.attributes[j];
                     if (!update_response) {
-                        value = attribute_info.value;
+                        value = attribute_info.contextValue;
                     }
 
                     if (flat) {
@@ -874,8 +881,8 @@
                         if (!update_response) {
                             attribute_entry.value = value;
                         }
-                        if (attribute_info.metadatas != null) {
-                            attribute_entry.metadata = attribute_info.metadatas;
+                        if (attribute_info.metadata != null) {
+                            attribute_entry.metadata = attribute_info.metadata;
                         }
                         entry.attributes.push(attribute_entry);
                     }
@@ -884,7 +891,7 @@
 
             if (status_info.code === 200) {
                 if (flat) {
-                    data[contextResponse.id] = entry;
+                    data[contextResponse.entityId.id] = entry;
                 } else {
                     data.push(entry);
                 }
@@ -971,7 +978,9 @@
 
     var process_error_code_json = function process_error_code_json(data) {
         if ('errorCode' in data) {
-            throw new NGSI.InvalidRequestError(parseInt(data.errorCode.code, 10), data.errorCode.reasonPhrase, data.errorCode.details);
+            if (data.errorCode != null)
+                if (parseInt(data.errorCode.code, 10) != 200)
+                    throw new NGSI.InvalidRequestError(parseInt(data.errorCode.code, 10), data.errorCode.reasonPhrase, data.errorCode.details);
         }
     };
 

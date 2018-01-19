@@ -57,20 +57,203 @@
     } else {
         NGSI = {};
         var URL = window.URL;
+
+        /*
+         * Basic makeRequest implementation for webbrowsers
+         */
+        var merge = function merge(object) {
+
+            if (object == null || typeof object !== "object") {
+                throw new TypeError("object argument must be an object");
+            }
+
+            Array.prototype.slice.call(arguments, 1).forEach(function (source) {
+                if (source != null) {
+                    Object.keys(source).forEach(function (key) {
+                        object[key] = source[key];
+                    });
+                }
+            });
+
+            return object;
+        };
+
+        var setRequestHeaders = function setRequestHeaders() {
+            var headers, name;
+
+            headers = merge({
+                'Accept': 'text/javascript, text/html, application/xml, text/xml, */*'
+            }, this.options.requestHeaders);
+
+            if (!('Content-Type' in headers) && this.options.contentType != null) {
+                headers['Content-Type'] = this.options.contentType;
+                if (this.options.encoding != null) {
+                    headers['Content-Type'] += '; charset=' + this.options.encoding;
+                }
+            }
+
+            for (name in headers) {
+                if (headers[name] != null) {
+                    this.transport.setRequestHeader(name, headers[name]);
+                }
+            }
+        };
+
+        var Response = function Response(request) {
+            Object.defineProperties(this, {
+                'request': {value: request},
+                'transport': {value: request.transport},
+                'status': {value: request.transport.status},
+                'statusText': {value: request.transport.statusText},
+                'response': {value: request.transport.response}
+            });
+
+            if (request.options.responseType == null || request.options.responseType === '') {
+                Object.defineProperties(this, {
+                    'responseText': {value: request.transport.responseText},
+                    'responseXML': {value: request.transport.responseXML}
+                });
+            }
+        };
+
+        Response.prototype.getHeader = function getHeader(name) {
+            try {
+                return this.transport.getResponseHeader(name);
+            } catch (e) { return null; }
+        };
+
+        Response.prototype.getAllResponseHeaders = function getAllResponseHeaders() {
+            return this.transport.getAllResponseHeaders();
+        };
+
+        var toQueryString = function toQueryString(parameters) {
+            var key, query = [];
+
+            if (parameters != null && typeof parameters === 'object') {
+                for (key in parameters) {
+                    if (typeof parameters[key] === 'undefined') {
+                        continue;
+                    } else if (parameters[key] === null) {
+                        query.push(encodeURIComponent(key) + '=');
+                    } else {
+                        query.push(encodeURIComponent(key) + '=' + encodeURIComponent(parameters[key]));
+                    }
+                }
+            } else {
+                return null;
+            }
+
+            if (query.length > 0) {
+                return query.join('&');
+            } else {
+                return null;
+            }
+        };
+
+        var Request = function Request(url, options) {
+            this.options = merge({
+                method: 'POST',
+                asynchronous: true,
+                responseType: null,
+                contentType: null,
+                encoding: null,
+                postBody: null
+            }, options);
+
+            Object.defineProperties(this, {
+                method: {
+                    value: this.options.method.toUpperCase()
+                }
+            });
+
+            var parameters = toQueryString(this.options.parameters);
+            if (['PUT', 'POST'].indexOf(this.method) !== -1 && this.options.postBody == null) {
+                if (parameters != null) {
+                    this.options.postBody = parameters;
+                    if (this.options.contentType == null) {
+                        this.options.contentType = 'application/x-www-form-urlencoded';
+                    }
+                    if (this.options.encoding == null) {
+                        this.options.encoding = 'UTF-8';
+                    }
+                }
+            } else /* if (['PUT', 'POST'].indexOf(this.method) === -1 || this.options.postBody != null) */ {
+                if (parameters != null) {
+                    if (url.search !== "") {
+                        url.search = url.search + '&' + parameters;
+                    }  else {
+                        url.search = '?' + parameters;
+                    }
+                }
+            }
+
+            Object.defineProperties(this, {
+                url: {
+                    value: url
+                },
+                abort: {
+                    value: function () {
+                        this.transport.aborted = true;
+                        this.transport.abort();
+                        return this;
+                    }
+                }
+            });
+
+            Object.defineProperty(this, 'transport', {value: new XMLHttpRequest()});;
+            if (this.options.withCredentials === true && this.options.supportsAccessControl) {
+                this.transport.withCredentials = true;
+            }
+            if (this.options.responseType) {
+                this.transport.responseType = this.options.responseType;
+            }
+
+            this.promise = new Promise(function (resolve, reject) {
+                this.transport.addEventListener("abort", function (event) {
+                    event.stopPropagation();
+                    event.preventDefault();
+
+                    reject("aborted");
+                });
+                this.transport.addEventListener("load", function () {
+                    var response = new Response(this);
+                    resolve(response);
+                }.bind(this));
+                this.transport.addEventListener("error", function () {
+                    reject(new NGSI.ConnectionError(this));
+                }.bind(this));
+            }.bind(this));
+
+            this.transport.open(this.method, this.url, this.options.asynchronous);
+            setRequestHeaders.call(this);
+            this.transport.send(this.options.postBody);
+        };
+
+        Request.prototype.then = function then(onFulfilled, onRejected) {
+            return this.promise.then(onFulfilled, onRejected);
+        };
+
+        Request.prototype.catch = function _catch(onRejected) {
+            return this.promise.catch(onRejected);
+        };
+
+        var makeRequest = function makeRequest(url, options) {
+            return new Request(url, options);
+        };
     }
 
     NGSI.endpoints = {
-        REGISTER_CONTEXT: 'v1/registry/registerContext',
-        DISCOVER_CONTEXT_AVAILABILITY: 'v1/registry/discoverContextAvailability',
-        SUBSCRIBE_CONTEXT_AVAILABILITY: 'v1/registry/subscribeContextAvailability',
-        UPDATE_CONTEXT_AVAILABILITY_SUBSCRIPTION: 'v1/registry/updateContextAvailabilitySubscription',
-        UNSUBSCRIBE_CONTEXT_AVAILABILITY: 'v1/registry/unsubscribeContextAvailability',
-        QUERY_CONTEXT: 'v1/queryContext',
-        UPDATE_CONTEXT: 'v1/updateContext',
-        SUBSCRIBE_CONTEXT: 'v1/subscribeContext',
-        UPDATE_CONTEXT_SUBSCRIPTION: 'v1/updateContextSubscription',
-        UNSUBSCRIBE_CONTEXT: 'v1/unsubscribeContext',
-        CONTEXT_TYPES: 'v1/contextTypes',
+        REGISTER_CONTEXT: 'ngsi10/registry/registerContext',
+        DISCOVER_CONTEXT_AVAILABILITY: 'ngsi10/registry/discoverContextAvailability',
+        SUBSCRIBE_CONTEXT_AVAILABILITY: 'ngsi10/registry/subscribeContextAvailability',
+        UPDATE_CONTEXT_AVAILABILITY_SUBSCRIPTION: 'ngsi10/registry/updateContextAvailabilitySubscription',
+        UNSUBSCRIBE_CONTEXT_AVAILABILITY: 'ngsi10/registry/unsubscribeContextAvailability',
+        QUERY_CONTEXT: 'ngsi10/queryContext',
+        UPDATE_CONTEXT: 'ngsi10/updateContext',
+        SUBSCRIBE_CONTEXT: 'ngsi10/subscribeContext',
+        UPDATE_CONTEXT_SUBSCRIPTION: 'ngsi10/updateContextSubscription',
+        UNSUBSCRIBE_CONTEXT: 'ngsi10/unsubscribeContext',
+        CONTEXT_TYPES: 'ngsi10/contextTypes',
 
         v2: {
             BATCH_QUERY_OP: 'v2/op/query',
@@ -109,7 +292,7 @@
             body = JSON.stringify(payload);
         }
 
-        requestHeaders = JSON.parse(JSON.stringify(this.request_headers));
+        requestHeaders = JSON.parse(JSON.stringify(this.headers));
         requestHeaders.Accept = 'application/json';
 
         this.makeRequest(url, {
@@ -192,7 +375,7 @@
             options.postBody = JSON.stringify(options.postBody);
         }
 
-        var requestHeaders = JSON.parse(JSON.stringify(this.request_headers));
+        var requestHeaders = JSON.parse(JSON.stringify(this.headers));
         requestHeaders.Accept = 'application/json';
 
         for (var headerName in options.requestHeaders) {
@@ -224,13 +407,16 @@
         var entityId, isPattern;
 
         isPattern = (typeof entity.isPattern === 'string' && entity.isPattern.trim().toLowerCase() === 'true') || (entity.isPattern === true);
+
         entityId = {
-            id: "" + entity.id,
-            isPattern: "" + isPattern
+            entityId: {
+                id: entity.id,
+                isPattern: "" + isPattern
+            }
         };
 
         if (entity.type != null) {
-            entityId.type = "" + entity.type;
+            entityId.entityId.type = "" + entity.type;
         }
 
         return entityId;
@@ -283,8 +469,8 @@
         if (Array.isArray(restriction.scopes)) {
             for (i = 0; i < restriction.scopes.length; i++) {
                 result.scopes.push({
-                    type: restriction.scopes[i].type,
-                    value: ngsi_build_scope_restriction_element_json(restriction.scopes[i])
+                    scopeType: restriction.scopes[i].scopeType,
+                    scopeValue: restriction.scopes[i].scopeValue
                 });
             }
         }
@@ -356,7 +542,7 @@
         };
 
         for (i = 0; i < e.length; i += 1) {
-            body.entities.push(ngsi_build_entity_id_element_json(e[i]));
+            body.entities.push(ngsi_build_entity_id_element_json(e[i]).entityId);
         }
 
         if (Array.isArray(attrNames) && attrNames.length > 0) {
@@ -412,11 +598,11 @@
                             value = null;
                         }
 
-                        attributeElement.value = value;
+                        attributeElement.contextValue = value;
                     }
 
                     if (Array.isArray(attribute.metadata) && attribute.metadata.length > 0) {
-                        attributeElement.metadatas = ngsi_build_attribute_metadata_element(attribute.metadata);
+                        attributeElement.metadata = ngsi_build_attribute_metadata_element(attribute.metadata);
                     }
 
                     attributeListElement.push(attributeElement);
@@ -649,6 +835,10 @@
             value = "";
         }
 
+        if (elements == null) {
+            return [data, error_data];
+        }
+
         for (i = 0; i < elements.length; i += 1) {
             contextResponse = elements[i].contextElement;
             status_info = process_status_info_json(elements[i]);
@@ -664,12 +854,12 @@
 
             // Entity
             if (status_info.code === 200 && flat) {
-                entry.id = contextResponse.id;
-                entry.type = contextResponse.type;
+                entry.id = contextResponse.entityId.id;
+                entry.type = contextResponse.entityId.type;
             } else {
                 entry.entity = {
-                    id: contextResponse.id,
-                    type: contextResponse.type
+                    id: contextResponse.entityId.id,
+                    type: contextResponse.entityId.type
                 };
             }
 
@@ -678,7 +868,7 @@
                 for (j = 0; j < contextResponse.attributes.length; j += 1) {
                     attribute_info = contextResponse.attributes[j];
                     if (!update_response) {
-                        value = attribute_info.value;
+                        value = attribute_info.contextValue;
                     }
 
                     if (flat) {
@@ -691,8 +881,8 @@
                         if (!update_response) {
                             attribute_entry.value = value;
                         }
-                        if (attribute_info.metadatas != null) {
-                            attribute_entry.metadata = attribute_info.metadatas;
+                        if (attribute_info.metadata != null) {
+                            attribute_entry.metadata = attribute_info.metadata;
                         }
                         entry.attributes.push(attribute_entry);
                     }
@@ -701,7 +891,7 @@
 
             if (status_info.code === 200) {
                 if (flat) {
-                    data[contextResponse.id] = entry;
+                    data[contextResponse.entityId.id] = entry;
                 } else {
                     data.push(entry);
                 }
@@ -788,7 +978,9 @@
 
     var process_error_code_json = function process_error_code_json(data) {
         if ('errorCode' in data) {
-            throw new NGSI.InvalidRequestError(parseInt(data.errorCode.code, 10), data.errorCode.reasonPhrase, data.errorCode.details);
+            if (data.errorCode != null)
+                if (parseInt(data.errorCode.code, 10) != 200)
+                    throw new NGSI.InvalidRequestError(parseInt(data.errorCode.code, 10), data.errorCode.reasonPhrase, data.errorCode.details);
         }
     };
 
@@ -1419,7 +1611,18 @@
      * @summary A context broker connection.
      *
      * @param {String|URL} url URL of the context broker
-     * @param {Object} options
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `headers` (`Object`): Default headers to be sent when making requests
+     *   through this connection.
+     * - `service` (`String`): Default service/tenant to use when making
+     *   requests through this connection.
+     * - `servicepath` (`String`): Default service path to use when making
+     *   requests through this connection.
+     * - `ngsi_proxy_url` (`String`|`URL`): URL of the NGSI proxy to be used for
+     *   receiving notifications.
      *
      * @example <caption>Basic usage</caption>
      *
@@ -1427,14 +1630,14 @@
      *
      * @example <caption>Using the FIWARE Lab's instance</caption>
      *
-     * var connection = new NGSI.Connection("http://orion.lab.fiware.org", {
-     *     requestHeaders: {
+     * var connection = new NGSI.Connection("http://orion.lab.fiware.org:1026", {
+     *     headers: {
      *         "X-Auth-Token": token
      *     }
      * });
      *
      **/
-    NGSI.Connection = function NGSIConnection(url, options) {
+    NGSI.Connection = function Connection(url, options) {
 
         try {
             url = new URL(url);
@@ -1454,24 +1657,29 @@
             options = {};
         }
 
-        if (options.request_headers != null) {
-            this.request_headers = options.request_headers;
+        if (options.headers != null && typeof options.headers === 'object') {
+            this.headers = options.headers;
+        } else if (options.request_headers != null) {
+            // Backwards compatibilty
+            this.headers = options.request_headers;
         } else {
-            this.request_headers = {};
+            this.headers = {};
         }
 
         if (options.service != null) {
-            deleteHeader("FIWARE-Service", this.request_headers);
-            this.request_headers["FIWARE-Service"] = options.service;
+            deleteHeader("FIWARE-Service", this.headers);
+            this.headers["FIWARE-Service"] = options.service;
         }
 
         if (options.servicepath != null) {
-            deleteHeader("FIWARE-ServicePath", this.request_headers);
-            this.request_headers["FIWARE-ServicePath"] = options.servicepath;
+            deleteHeader("FIWARE-ServicePath", this.headers);
+            this.headers["FIWARE-ServicePath"] = options.servicepath;
         }
 
         if (typeof options.requestFunction === 'function') {
             this.makeRequest = options.requestFunction;
+        } else {
+            this.makeRequest = makeRequest;
         }
 
         if (options.ngsi_proxy_connection instanceof NGSI.ProxyConnection) {
@@ -4813,6 +5021,24 @@
      * @method "v2.batchQuery"
      * @memberof NGSI.Connection
      *
+     * @param {Object} query
+     *
+     * Object with the parameters to make the entity queries. Composed of those
+     * attributes:
+     *
+     * - `entities` (`Array`): a list of entites to search for. Each element is
+     *   represented by a JSON object with the following elements:
+     *      - `id` or `idPattern`: Id or pattern of the affected entities. Both
+     *      cannot be used at the same time, but one of them must be present.
+     *      - `type` or `typePattern`: Type or type pattern of the entities total
+     *      search for. Both cannot be used at the same time. If omitted, it
+     *      means "any entity type"
+     * - `attributes` (`Array`): a list of attribute names to search for. If
+     *   omitted, it means "all attributes".
+     * - `metadata` (`Array`): a list of metadata names to include in the
+     *   response. See "Filtering out attributes and metadata" section for more
+     *   detail.
+     *
      * @param {Object} [options]
      *
      * Object with extra options:
@@ -4871,7 +5097,9 @@
         }
 
         if (query == null) {
-            throw new TypeError("missing query parameter");
+            query = {'entities': []};
+        } else if (query.entities == null && query.attributes == null) {
+            query.entities = [];
         }
 
         var connection = privates.get(this);
